@@ -1,83 +1,100 @@
-# handlers/learning.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from sqlalchemy import select
-from database.db import async_session
-from database.models import Lesson, User
-from keyboards.inline import get_learning_buttons, get_after_learning_buttons, get_topic_selection_keyboard
-from utils.helpers import get_user_lesson_state, update_user_lesson_state, get_lessons_by_level
+from aiogram.fsm.context import FSMContext
+from database.models import User, Lesson
+from keyboards.inline import (
+    get_learning_navigation_keyboard,
+    get_learning_complete_keyboard,
+    get_lesson_topics_keyboard
+)
+from utils.helpers import get_localized_text, set_user_lesson_progress
 
 router = Router()
-user_last_lesson = {}
 
 
-@router.message(F.text.lower() == "📚 обучение")
-async def enter_learning(message: Message):
-    user_id = message.from_user.id
-    async with async_session() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == user_id))).scalar()
-        lessons = await get_lessons_by_level(user.level)
+@router.message(F.text == "📚 Обучение")
+async def enter_learning(message: Message, state: FSMContext):
+    user = await User.get_or_none(telegram_id=message.from_user.id)
+    if not user:
+        return await message.answer("Ошибка доступа. Пожалуйста, перезапустите бота.")
 
-        if not lessons:
-            await message.answer("❌ Уроки не найдены.")
-            return
+    if not user.learning_intro_shown:
+        text = get_localized_text(user.language, "learning_intro")
+        await message.answer(text)
+        user.learning_intro_shown = True
+        await user.save()
 
-        last_index = await get_user_lesson_state(user_id)
-        lesson = lessons[last_index] if last_index < len(lessons) else lessons[0]
-
-        user_last_lesson[user_id] = lesson.id
-        await message.answer(f"📘 {lesson.title}\n\n{lesson.content}", reply_markup=get_learning_buttons())
-
-
-@router.callback_query(F.data == "next_lesson")
-async def next_lesson(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    async with async_session() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == user_id))).scalar()
-        lessons = await get_lessons_by_level(user.level)
-
-        current_index = await get_user_lesson_state(user_id)
-        next_index = current_index + 1 if current_index + 1 < len(lessons) else 0
-        await update_user_lesson_state(user_id, next_index)
-
-        lesson = lessons[next_index]
-        user_last_lesson[user_id] = lesson.id
-        await callback.message.edit_text(f"📘 {lesson.title}\n\n{lesson.content}", reply_markup=get_learning_buttons())
-        await callback.answer()
+    last_lesson = await Lesson.filter(level=user.level).order_by("id").first()
+    if last_lesson:
+        await send_lesson(message, user, last_lesson.id, state)
 
 
-@router.callback_query(F.data == "prev_lesson")
-async def prev_lesson(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    async with async_session() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == user_id))).scalar()
-        lessons = await get_lessons_by_level(user.level)
+async def send_lesson(message: Message, user: User, lesson_id: int, state: FSMContext):
+    lesson = await Lesson.get_or_none(id=lesson_id, level=user.level)
+    if not lesson:
+        return await message.answer("Урок не найден.")
 
-        current_index = await get_user_lesson_state(user_id)
-        prev_index = current_index - 1 if current_index > 0 else len(lessons) - 1
-        await update_user_lesson_state(user_id, prev_index)
+    await state.update_data(current_lesson_id=lesson.id)
+    await set_user_lesson_progress(user.id, lesson.id)
 
-        lesson = lessons[prev_index]
-        user_last_lesson[user_id] = lesson.id
-        await callback.message.edit_text(f"📘 {lesson.title}\n\n{lesson.content}", reply_markup=get_learning_buttons())
-        await callback.answer()
+    await message.answer(
+        f"<b>{lesson.title}</b>\n\n{lesson.content}",
+        reply_markup=get_learning_navigation_keyboard(user.language),
+        parse_mode="HTML"
+    )
 
 
-@router.callback_query(F.data == "select_topic")
-async def show_topics(callback: CallbackQuery):
-    async with async_session() as session:
-        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar()
-        lessons = await get_lessons_by_level(user.level)
-        await callback.message.edit_text("📂 Выберите тему:", reply_markup=get_topic_selection_keyboard(lessons))
-        await callback.answer()
+@router.callback_query(F.data == "lesson_next")
+async def next_lesson(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    current_id = data.get("current_lesson_id", 0)
+    current_lesson = await Lesson.get_or_none(id=current_id)
+    next_lesson = await Lesson.filter(level=current_lesson.level, id__gt=current_id).order_by("id").first()
+
+    if next_lesson:
+        await send_lesson(callback.message, current_lesson.user, next_lesson.id, state)
+    else:
+        await callback.message.edit_text(
+            "🎉 Вы завершили обучение!",
+            reply_markup=get_learning_complete_keyboard(current_lesson.user.language)
+        )
 
 
-@router.callback_query(F.data.startswith("topic_"))
-async def select_topic(callback: CallbackQuery):
-    topic_id = int(callback.data.split("_")[1])
-    async with async_session() as session:
-        lesson = await session.get(Lesson, topic_id)
-        await update_user_lesson_state(callback.from_user.id, topic_id - 1)
-        user_last_lesson[callback.from_user.id] = lesson.id
-        await callback.message.edit_text(f"📘 {lesson.title}\n\n{lesson.content}", reply_markup=get_learning_buttons())
-        await callback.answer()
+@router.callback_query(F.data == "lesson_prev")
+async def previous_lesson(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    current_id = data.get("current_lesson_id", 0)
+    current_lesson = await Lesson.get_or_none(id=current_id)
+    prev_lesson = await Lesson.filter(level=current_lesson.level, id__lt=current_id).order_by("-id").first()
+
+    if prev_lesson:
+        await send_lesson(callback.message, current_lesson.user, prev_lesson.id, state)
+    else:
+        await callback.answer("Это первый урок.")
+
+
+@router.callback_query(F.data == "lesson_repeat")
+async def repeat_lesson(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lesson_id = data.get("current_lesson_id", 0)
+    user = await User.get_or_none(telegram_id=callback.from_user.id)
+
+    if user and lesson_id:
+        await user.lessons_to_repeat.add(lesson_id)
+        await callback.answer("Урок добавлен в список повторения.")
+    else:
+        await callback.answer("Ошибка сохранения.")
+
+
+@router.callback_query(F.data == "lesson_topics")
+async def choose_topic(callback: CallbackQuery):
+    user = await User.get_or_none(telegram_id=callback.from_user.id)
+    lessons = await Lesson.filter(level=user.level).order_by("id")
+    await callback.message.edit_text("📂 Выберите тему:", reply_markup=get_lesson_topics_keyboard(lessons))
+
+
+@router.callback_query(F.data.startswith("lesson_"))
+async def go_to_topic(callback: CallbackQuery, state: FSMContext):
+    lesson_id = int(callback.data.split("_")[1])
+    user = await User.get_or_none(telegram_id=callback.from_user.id)
+    await send_lesson(callback.message, user, lesson_id, state)
