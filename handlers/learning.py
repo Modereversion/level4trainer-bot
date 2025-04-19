@@ -1,47 +1,106 @@
 # handlers/learning.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from keyboards.inline import get_lesson_navigation, get_after_learning_buttons
 from database.db import async_session
-from database.models import Lesson
-from sqlalchemy import select
+from database.models import Lesson, UserProgress
+from keyboards.inline import get_learning_buttons, get_learning_after_buttons, get_learning_topic_buttons
+from utils.helpers import get_user_language, get_user_level
 
 router = Router()
 
+user_learning_state = {}  # {user_id: {'lesson_id': int}}
 
-@router.message(F.text.lower() == "📚 обучение")
+
+@router.message(F.text == "📚 Обучение")
 async def enter_learning(message: Message):
-    # Показываем вступительное сообщение
-    await message.answer(
-        "📚 Вы вошли в раздел обучения.\n\n"
-        "Изучайте грамматические и лексические темы, соответствующие уровню ICAO 4 или 5.\n"
-        "Рекомендуется пройти все темы перед тренировкой и экзаменом.",
-    )
-    await show_lesson(message, 1)
+    user_id = message.from_user.id
+    lang = await get_user_language(user_id)
+    level = await get_user_level(user_id)
 
-
-async def show_lesson(message: Message, lesson_id: int):
     async with async_session() as session:
-        lesson = await session.scalar(select(Lesson).where(Lesson.id == lesson_id))
-        if lesson:
-            text = f"📘 {lesson.title}\n\n{lesson.content}"
-            await message.answer(
-                text,
-                reply_markup=get_lesson_navigation(lesson.id)
-            )
-        else:
-            await message.answer("Урок не найден.")
+        result = await session.execute(
+            Lesson.__table__.select().where(Lesson.level == level)
+        )
+        lessons = result.fetchall()
+
+    if not lessons:
+        await message.answer("Нет доступных уроков.")
+        return
+
+    lesson = lessons[0]
+    user_learning_state[user_id] = {"lesson_id": lesson.id}
+    await message.answer(
+        f"📘 {lesson.title}\n\n{lesson.content}",
+        reply_markup=get_learning_buttons()
+    )
 
 
-@router.callback_query(F.data.startswith("lesson_"))
-async def lesson_navigation(callback: CallbackQuery):
-    action, lesson_id = callback.data.split("_")
-    lesson_id = int(lesson_id)
+@router.callback_query(F.data == "next_lesson")
+async def next_lesson(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    current_id = user_learning_state.get(user_id, {}).get("lesson_id")
 
-    if action == "lesson":
-        await show_lesson(callback.message, lesson_id)
-    elif action == "next":
-        await show_lesson(callback.message, lesson_id + 1)
-    elif action == "prev" and lesson_id > 1:
-        await show_lesson(callback.message, lesson_id - 1)
+    async with async_session() as session:
+        result = await session.execute(
+            Lesson.__table__.select().where(Lesson.id > current_id).order_by(Lesson.id.asc())
+        )
+        next_lesson = result.first()
+
+    if next_lesson:
+        user_learning_state[user_id]["lesson_id"] = next_lesson.id
+        await callback.message.edit_text(
+            f"📘 {next_lesson.title}\n\n{next_lesson.content}",
+            reply_markup=get_learning_buttons()
+        )
+    else:
+        await callback.message.edit_text("✅ Вы завершили обучение.", reply_markup=get_learning_after_buttons())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "prev_lesson")
+async def previous_lesson(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    current_id = user_learning_state.get(user_id, {}).get("lesson_id")
+
+    async with async_session() as session:
+        result = await session.execute(
+            Lesson.__table__.select().where(Lesson.id < current_id).order_by(Lesson.id.desc())
+        )
+        prev_lesson = result.first()
+
+    if prev_lesson:
+        user_learning_state[user_id]["lesson_id"] = prev_lesson.id
+        await callback.message.edit_text(
+            f"📘 {prev_lesson.title}\n\n{prev_lesson.content}",
+            reply_markup=get_learning_buttons()
+        )
+    else:
+        await callback.answer("Это первый урок.")
+
+
+@router.callback_query(F.data == "choose_topic")
+async def choose_learning_topic(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "📂 Выберите тему:",
+        reply_markup=get_learning_topic_buttons()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("topic_"))
+async def show_topic(callback: CallbackQuery):
+    topic_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+
+    async with async_session() as session:
+        lesson = await session.get(Lesson, topic_id)
+
+    if lesson:
+        user_learning_state[user_id] = {"lesson_id": lesson.id}
+        await callback.message.edit_text(
+            f"📘 {lesson.title}\n\n{lesson.content}",
+            reply_markup=get_learning_buttons()
+        )
+    else:
+        await callback.message.edit_text("Урок не найден.")
     await callback.answer()
