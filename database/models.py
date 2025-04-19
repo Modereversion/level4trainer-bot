@@ -1,72 +1,51 @@
-# database/models.py
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from sqlalchemy.sql import func
 from database.db import Base
-
 
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, nullable=False)
-    full_name = Column(String, nullable=True)
-    username = Column(String, nullable=True)
-    language = Column(String, default='en')
-    level = Column(String, default='level_4')
-    voice_enabled = Column(Boolean, default=True)
-    answer_enabled = Column(Boolean, default=True)
-    question_of_the_day = Column(Boolean, default=False)
-    tip_of_the_day = Column(Boolean, default=False)
-    access_type = Column(String, default='regular')
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, unique=True, nullable=False)
+    full_name = Column(String)
+    username = Column(String)
+    language = Column(String, default="en")
+    level = Column(String, default="4")
+    tts_enabled = Column(Boolean, default=True)
+    tts_answers = Column(Boolean, default=True)
+    question_of_day = Column(Boolean, default=False)
+    tip_of_day = Column(Boolean, default=False)
+    access_level = Column(String, default="basic")  # basic, extended, unlimited
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    progress = relationship("Progress", back_populates="user")
+    feedback = relationship("Feedback", back_populates="user")
 
 
-class Question(Base):
-    __tablename__ = 'questions'
+class Progress(Base):
+    __tablename__ = 'progress'
 
-    id = Column(Integer, primary_key=True, index=True)
-    level = Column(String, nullable=False)
-    text_en = Column(Text, nullable=False)
-    text_ru = Column(Text, nullable=False)
-    answer_en = Column(Text, nullable=False)
-    answer_ru = Column(Text, nullable=False)
-
-
-class Lesson(Base):
-    __tablename__ = 'lessons'
-
-    id = Column(Integer, primary_key=True, index=True)
-    level = Column(String, nullable=False)
-    title = Column(String, nullable=False)
-    content = Column(Text, nullable=False)
-
-
-class EmergencyCase(Base):
-    __tablename__ = 'cases'
-
-    id = Column(Integer, primary_key=True, index=True)
-    text_en = Column(Text, nullable=False)
-    text_ru = Column(Text, nullable=False)
-    sample_answer_en = Column(Text, nullable=True)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    lesson_index = Column(Integer, default=0)
+    current_question_id = Column(String)
+    level = Column(String)
+    questions_done = Column(Integer, default=0)
+    cases_done = Column(Integer, default=0)
+    exams_done = Column(Integer, default=0)
+    questions_postponed = Column(Text, default="")
+    topics_postponed = Column(Text, default="")
+    user = relationship("User", back_populates="progress")
 
 
 class Feedback(Base):
-    __tablename__ = 'feedbacks'
+    __tablename__ = 'feedback'
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    message = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class UserProgress(Base):
-    __tablename__ = 'progress'
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    question_id = Column(Integer, nullable=True)
-    lesson_id = Column(Integer, nullable=True)
-    case_id = Column(Integer, nullable=True)
-    exam_score = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    message = Column(Text)
+    reply = Column(Text, default="")
+    timestamp = Column(DateTime, default=func.now())
+    user = relationship("User", back_populates="feedback")
