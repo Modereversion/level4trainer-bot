@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from keyboards.inline import (
-    get_language_settings,
     get_level_choice,
     get_voice_settings,
     get_yes_no_keyboard,
