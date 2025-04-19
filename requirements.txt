@@ -1,0 +1,4 @@
+aiogram
+openai
+tortoise-orm
+python-dotenv
