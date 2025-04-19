@@ -1,51 +1,69 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database.db import Base
 
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    tg_id = Column(Integer, unique=True, index=True)
     full_name = Column(String)
     username = Column(String)
-    language = Column(String, default="en")
+    language_code = Column(String)
     level = Column(String, default="4")
-    tts_enabled = Column(Boolean, default=True)
-    tts_answers = Column(Boolean, default=True)
+    access_level = Column(String, default="basic")  # basic / extended / unlimited
+    joined_at = Column(DateTime(timezone=True), server_default=func.now())
+    voice_enabled = Column(Boolean, default=True)
+    answer_voice_enabled = Column(Boolean, default=True)
     question_of_day = Column(Boolean, default=False)
     tip_of_day = Column(Boolean, default=False)
-    access_level = Column(String, default="basic")  # basic, extended, unlimited
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
-    
-    progress = relationship("Progress", back_populates="user")
-    feedback = relationship("Feedback", back_populates="user")
 
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String)
+    level = Column(String)
+    content = Column(Text)
+    order = Column(Integer)
+
+class Question(Base):
+    __tablename__ = "questions"
+
+    id = Column(Integer, primary_key=True)
+    level = Column(String)  # 4 / 5
+    question_en = Column(Text)
+    question_ru = Column(Text)
+    answer_en = Column(Text)
+    answer_ru = Column(Text)
+
+class Case(Base):
+    __tablename__ = "cases"
+
+    id = Column(Integer, primary_key=True)
+    title_en = Column(Text)
+    title_ru = Column(Text)
+    level = Column(String)
+    sample_answer = Column(Text)
 
 class Progress(Base):
-    __tablename__ = 'progress'
+    __tablename__ = "progress"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    lesson_index = Column(Integer, default=0)
-    current_question_id = Column(String)
-    level = Column(String)
-    questions_done = Column(Integer, default=0)
-    cases_done = Column(Integer, default=0)
-    exams_done = Column(Integer, default=0)
-    questions_postponed = Column(Text, default="")
-    topics_postponed = Column(Text, default="")
-    user = relationship("User", back_populates="progress")
-
+    user = relationship("User")
+    questions_completed = Column(JSON, default=[])
+    lessons_completed = Column(JSON, default=[])
+    postponed_questions = Column(JSON, default=[])
+    postponed_lessons = Column(JSON, default=[])
+    emergencies_used = Column(Integer, default=0)
+    exams_used = Column(Integer, default=0)
 
 class Feedback(Base):
-    __tablename__ = 'feedback'
+    __tablename__ = "feedback"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer)
     message = Column(Text)
-    reply = Column(Text, default="")
-    timestamp = Column(DateTime, default=func.now())
-    user = relationship("User", back_populates="feedback")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
