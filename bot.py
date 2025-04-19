@@ -1,31 +1,29 @@
-import logging
+import asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.utils import executor
-import os
-from config import BOT_TOKEN
-from handlers import (
-    start, learning, training, emergencies,
-    exam, settings, admin
+from config import settings
+from database.db import init_db
+from handlers import start, training, learning, exam, emergencies, settings as user_settings, admin
+from keyboards.reply import main_menu
+
+bot = Bot(token=settings.BOT_TOKEN, parse_mode='HTML')
+dp = Dispatcher()
+
+dp.include_routers(
+    start.router,
+    training.router,
+    learning.router,
+    exam.router,
+    emergencies.router,
+    user_settings.router,
+    admin.router
 )
-from services import reminder
 
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+async def main():
+    await init_db()
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_my_commands([], scope=None)
+    await bot.set_chat_menu_button(menu_button=main_menu)
+    await dp.start_polling(bot)
 
-# Регистрируем хендлеры
-start.register_handlers(dp)
-learning.register_handlers(dp)
-training.register_handlers(dp)
-emergencies.register_handlers(dp)
-exam.register_handlers(dp)
-settings.register_handlers(dp)
-admin.register_handlers(dp)
-
-async def on_startup(dp):
-    # Инициализация БД, CRON-напоминаний и т.д.
-    await reminder.setup(dp)
-    logging.info("Бот запущен!")
-
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+if __name__ == '__main__':
+    asyncio.run(main())
