@@ -1,17 +1,35 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-import logging
-import os
+# bot.py
+import asyncio
+from aiogram import Bot, Dispatcher
+from aiogram.enums import ParseMode
+from aiogram.fsm.strategy import FSMStrategy
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.bot import DefaultBotProperties
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+from config import BOT_TOKEN
+from handlers import start, training, learning, exam, emergencies, settings, admin
+from database.db import create_db
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
-logging.basicConfig(level=logging.INFO)
 
-@dp.message_handler(commands=["start"])
-async def start_handler(message: types.Message):
-    await message.answer("Привет! Бот запущен ✅")
+async def main():
+    await create_db()
 
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    dp = Dispatcher(storage=MemoryStorage(), fsm_strategy=FSMStrategy.CHAT)
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    dp.include_routers(
+        start.router,
+        training.router,
+        learning.router,
+        exam.router,
+        emergencies.router,
+        settings.router,
+        admin.router
+    )
+
+    print("Bot started...")
+    await dp.start_polling(bot)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
