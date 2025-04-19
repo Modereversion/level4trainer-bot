@@ -1,4 +1,11 @@
-aiogram
-openai
-tortoise-orm
+# requirements.txt
+aiohttp
+aiogram==3.4.1
+asyncpg
 python-dotenv
+openai
+loguru
+uvicorn
+fastapi
+sqlalchemy
+alembic
